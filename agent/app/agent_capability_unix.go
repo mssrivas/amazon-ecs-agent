@@ -115,14 +115,14 @@ func (agent *ecsAgent) appendTaskEIACapabilities(capabilities []*ecs.Attribute) 
 	return appendNameOnlyAttribute(capabilities, attributePrefix+taskEIAAttributeSuffix)
 }
 
-func (agent *ecsAgent) appendAWSRouterFluentdCapabilities(capabilities []*ecs.Attribute) []*ecs.Attribute {
-	return appendNameOnlyAttribute(capabilities, attributePrefix+capabilityAWSRouterFluentd)
+func (agent *ecsAgent) appendFirelensFluentdCapabilities(capabilities []*ecs.Attribute) []*ecs.Attribute {
+	return appendNameOnlyAttribute(capabilities, attributePrefix+capabilityFirelensFluentd)
 }
 
-func (agent *ecsAgent) appendAWSRouterFluentbitCapabilities(capabilities []*ecs.Attribute) []*ecs.Attribute {
-	return appendNameOnlyAttribute(capabilities, attributePrefix+capabilityAWSRouterFluentbit)
+func (agent *ecsAgent) appendFirelensFluentbitCapabilities(capabilities []*ecs.Attribute) []*ecs.Attribute {
+	return appendNameOnlyAttribute(capabilities, attributePrefix+capabilityFirelensFluentbit)
 }
 
-func (agent *ecsAgent) appendAWSLoggingDriverCapabilities(capabilities []*ecs.Attribute) []*ecs.Attribute {
-	return appendNameOnlyAttribute(capabilities, capabilityPrefix+capabilityAWSRouterLoggingDriver)
+func (agent *ecsAgent) appendFirelensLoggingDriverCapabilities(capabilities []*ecs.Attribute) []*ecs.Attribute {
+	return appendNameOnlyAttribute(capabilities, capabilityPrefix+capabilityFirelensLoggingDriver)
 }

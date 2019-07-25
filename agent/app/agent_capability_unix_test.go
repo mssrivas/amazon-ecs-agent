@@ -781,13 +781,13 @@ func TestAWSLoggingDriverAndLogRouterCapabilitiesUnix(t *testing.T) {
 				Name: aws.String(attributePrefix + taskEIAAttributeSuffix),
 			},
 			{
-				Name: aws.String(attributePrefix + capabilityAWSRouterFluentd),
+				Name: aws.String(attributePrefix + capabilityFirelensFluentd),
 			},
 			{
-				Name: aws.String(attributePrefix + capabilityAWSRouterFluentbit),
+				Name: aws.String(attributePrefix + capabilityFirelensFluentbit),
 			},
 			{
-				Name: aws.String(capabilityPrefix + capabilityAWSRouterLoggingDriver),
+				Name: aws.String(capabilityPrefix + capabilityFirelensLoggingDriver),
 			},
 		}...)
 	ctx, cancel := context.WithCancel(context.TODO())
