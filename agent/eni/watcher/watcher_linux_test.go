@@ -1,6 +1,6 @@
 // +build linux,unit
 
-// Copyright 2017-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -34,9 +34,9 @@ import (
 	"github.com/aws/amazon-ecs-agent/agent/engine/dockerstate"
 	"github.com/aws/amazon-ecs-agent/agent/statechange"
 
-	"github.com/aws/amazon-ecs-agent/agent/engine/dockerstate/mocks"
-	"github.com/aws/amazon-ecs-agent/agent/eni/netlinkwrapper/mocks"
-	"github.com/aws/amazon-ecs-agent/agent/eni/udevwrapper/mocks"
+	mock_dockerstate "github.com/aws/amazon-ecs-agent/agent/engine/dockerstate/mocks"
+	mock_netlinkwrapper "github.com/aws/amazon-ecs-agent/agent/eni/netlinkwrapper/mocks"
+	mock_udevwrapper "github.com/aws/amazon-ecs-agent/agent/eni/udevwrapper/mocks"
 )
 
 const (

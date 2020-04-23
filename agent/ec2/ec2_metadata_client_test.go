@@ -1,6 +1,6 @@
 // +build unit
 
-// Copyright 2014-2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/aws/amazon-ecs-agent/agent/ec2"
-	"github.com/aws/amazon-ecs-agent/agent/ec2/mocks"
+	mock_ec2 "github.com/aws/amazon-ecs-agent/agent/ec2/mocks"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -223,4 +223,32 @@ func TestPublicIPv4Address(t *testing.T) {
 	publicIPResponse, err := testClient.PublicIPv4Address()
 	assert.NoError(t, err)
 	assert.Equal(t, publicIP, publicIPResponse)
+}
+
+func TestSpotInstanceAction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockGetter := mock_ec2.NewMockHttpClient(ctrl)
+	testClient := ec2.NewEC2MetadataClient(mockGetter)
+
+	mockGetter.EXPECT().GetMetadata(
+		ec2.SpotInstanceActionResource).Return("{\"action\": \"terminate\", \"time\": \"2017-09-18T08:22:00Z\"}", nil)
+	resp, err := testClient.SpotInstanceAction()
+	assert.NoError(t, err)
+	assert.Equal(t, "{\"action\": \"terminate\", \"time\": \"2017-09-18T08:22:00Z\"}", resp)
+}
+
+func TestSpotInstanceActionError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockGetter := mock_ec2.NewMockHttpClient(ctrl)
+	testClient := ec2.NewEC2MetadataClient(mockGetter)
+
+	mockGetter.EXPECT().GetMetadata(
+		ec2.SpotInstanceActionResource).Return("", fmt.Errorf("ERROR"))
+	resp, err := testClient.SpotInstanceAction()
+	assert.Error(t, err)
+	assert.Equal(t, "", resp)
 }

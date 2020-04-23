@@ -1,4 +1,4 @@
-// Copyright 2014-2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -36,7 +36,7 @@ const (
 	DockerReservedSSLPort = 2376
 	// DockerTagSeparator is the charactor used to separate names and tag in docker
 	DockerTagSeparator = ":"
-	// DockerDefaultTag is the default tag used by docker
+	// DefaultDockerTag is the default tag used by docker
 	DefaultDockerTag = "latest"
 
 	SSHPort = 22
@@ -75,13 +75,17 @@ const (
 	// image cleanup.
 	DefaultNumImagesToDeletePerCycle = 5
 
-	// DefaultNumImagesToDeletePerCycle specifies the default number of nonecs containers to delete when agent performs
+	// DefaultNumNonECSContainersToDeletePerCycle specifies the default number of nonecs containers to delete when agent performs
 	// nonecs containers cleanup.
 	DefaultNumNonECSContainersToDeletePerCycle = 5
 
 	// DefaultImageDeletionAge specifies the default value for minimum amount of elapsed time after an image
 	// has been pulled before it can be deleted.
 	DefaultImageDeletionAge = 1 * time.Hour
+
+	// DefaultNonECSImageDeletionAge specifies the default value for minimum amount of elapsed time after an image
+	// has been created before it can be deleted
+	DefaultNonECSImageDeletionAge = 1 * time.Hour
 
 	// minimumTaskCleanupWaitDuration specifies the minimum duration to wait before cleaning up
 	// a task's container. This is used to enforce sane values for the config.TaskCleanupWaitDuration field.
@@ -520,6 +524,7 @@ func environmentConfig() (Config, error) {
 		TaskIAMRoleEnabledForNetworkHost:    utils.ParseBool(os.Getenv("ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST"), false),
 		ImageCleanupDisabled:                utils.ParseBool(os.Getenv("ECS_DISABLE_IMAGE_CLEANUP"), false),
 		MinimumImageDeletionAge:             parseEnvVariableDuration("ECS_IMAGE_MINIMUM_CLEANUP_AGE"),
+		NonECSMinimumImageDeletionAge:       parseEnvVariableDuration("NON_ECS_IMAGE_MINIMUM_CLEANUP_AGE"),
 		ImageCleanupInterval:                parseEnvVariableDuration("ECS_IMAGE_CLEANUP_INTERVAL"),
 		NumImagesToDeletePerCycle:           parseNumImagesToDeletePerCycle(),
 		NumNonECSContainersToDeletePerCycle: parseNumNonECSContainersToDeletePerCycle(),
@@ -545,6 +550,9 @@ func environmentConfig() (Config, error) {
 		NvidiaRuntime:                       os.Getenv("ECS_NVIDIA_RUNTIME"),
 		TaskMetadataAZDisabled:              utils.ParseBool(os.Getenv("ECS_DISABLE_TASK_METADATA_AZ"), false),
 		CgroupCPUPeriod:                     parseCgroupCPUPeriod(),
+		SpotInstanceDrainingEnabled:         utils.ParseBool(os.Getenv("ECS_ENABLE_SPOT_INSTANCE_DRAINING"), false),
+		GMSACapable:                         parseGMSACapability(),
+		VolumePluginCapabilities:            parseVolumePluginCapabilities(),
 	}, err
 }
 

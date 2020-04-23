@@ -1,6 +1,6 @@
 // +build !windows,functional
 
-// Copyright 2014-2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -113,22 +113,29 @@ func RunAgent(t *testing.T, options *AgentOptions) *TestAgent {
 		}
 	}
 
-	tmpdirOverride := os.Getenv("ECS_FTEST_TMP")
+	agentTempDir := ""
+	if options != nil && options.TempDirOverride != "" {
+		agentTempDir = options.TempDirOverride
+	} else {
+		tmpdirOverride := os.Getenv("ECS_FTEST_TMP")
 
-	agentTempdir, err := ioutil.TempDir(tmpdirOverride, "ecs_integ_testdata")
-	if err != nil {
-		t.Fatal("Could not create temp dir for test")
+		dir, err := ioutil.TempDir(tmpdirOverride, "ecs_integ_testdata")
+		if err != nil {
+			t.Fatal("Could not create temp dir for test")
+		}
+		agentTempDir = dir
 	}
-	logdir := filepath.Join(agentTempdir, "log")
-	datadir := filepath.Join(agentTempdir, "data")
+
+	logdir := filepath.Join(agentTempDir, "log")
+	datadir := filepath.Join(agentTempDir, "data")
 	os.Mkdir(logdir, 0755)
 	os.Mkdir(datadir, 0755)
-	agent.TestDir = agentTempdir
+	agent.TestDir = agentTempDir
 	agent.Options = options
 	if options == nil {
 		agent.Options = &AgentOptions{}
 	}
-	t.Logf("Created directory %s to store test data in", agentTempdir)
+	t.Logf("Created directory %s to store test data in", agentTempDir)
 
 	err = agent.StartAgent()
 	if err != nil {
@@ -137,8 +144,15 @@ func RunAgent(t *testing.T, options *AgentOptions) *TestAgent {
 
 	if options != nil && options.EnableTaskENI {
 		// if task networking is enabled, needs to wait for container instance to become active
-		err = agent.WaitContainerInstanceStatus("ACTIVE")
-		require.NoError(t, err)
+		err = agent.WaitContainerInstanceStatus("ACTIVE", t)
+		// If we get an error here, we need to stop the agent before failing, since the caller won't be stopping it.
+		if err != nil {
+			t.Logf("Failed to wait for container instance to reach ACTIVE: %v", err)
+			t.Logf("Stopping agent container: %s", agent.DockerID)
+			errS := agent.StopAgent()
+			require.NoError(t, errS)
+			t.Fatalf("Failed to wait for container instance to reach ACTIVE: %v", err)
+		}
 	}
 	return agent
 }
@@ -183,11 +197,7 @@ func (agent *TestAgent) StartAgent() error {
 		PortBindings: map[nat.Port][]nat.PortBinding{
 			"51678/tcp": {{HostIP: "0.0.0.0"}},
 		},
-		Links: agent.Options.ContainerLinks,
-	}
-
-	if os.Getenv("ECS_FTEST_FORCE_NET_HOST") != "" {
-		hostConfig.NetworkMode = "host"
+		NetworkMode: "host",
 	}
 
 	if agent.Options != nil {
@@ -218,7 +228,7 @@ func (agent *TestAgent) StartAgent() error {
 				"/lib64:/lib64:ro",
 				"/proc:/host/proc:ro",
 				"/var/lib/ecs/dhclient:/var/lib/ecs/dhclient",
-				"/sbin:/sbin:ro",
+				"/sbin:/host/sbin:ro",
 				"/lib:/lib:ro",
 				"/usr/lib:/usr/lib:ro",
 				"/usr/lib64:/usr/lib64:ro",
@@ -298,7 +308,7 @@ func (agent *TestAgent) getBindMounts() []string {
 }
 
 func (agent *TestAgent) Cleanup() {
-	if agent.Options == nil || ! agent.Options.EnableTaskENI {
+	if agent.Options == nil || !agent.Options.EnableTaskENI {
 		// if task networking is not enabled, do the usual cleanup
 		agent.platformIndependentCleanup()
 		return
@@ -328,6 +338,6 @@ func (agent *TestAgent) Cleanup() {
 	require.NoError(agent.t, err)
 
 	// wait for container instance to reach INACTIVE
-	err = agent.WaitContainerInstanceStatus("INACTIVE")
+	err = agent.WaitContainerInstanceStatus("INACTIVE", agent.t)
 	require.NoError(agent.t, err)
 }

@@ -1,4 +1,4 @@
-# Copyright 2014-2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may
 # not use this file except in compliance with the License. A copy of the
@@ -12,8 +12,17 @@
 # permissions and limitations under the License.
 
 Param (
-  [string]$BaseImageName="microsoft/windowsservercore"
+  [string]$Platform="windows2016"
 )
+
+if ($Platform -like "windows2016") {
+  $BaseImageName="mcr.microsoft.com/windows/servercore:ltsc2016"
+} elseif ($Platform -like "windows2019")  {
+  $BaseImageName="mcr.microsoft.com/windows/servercore:ltsc2019"
+} else {
+  echo "Invalid platform parameter"
+  exit 1
+}
 
 # Prepared base image
 $dockerImages = Invoke-Expression "docker images"

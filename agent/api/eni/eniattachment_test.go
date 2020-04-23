@@ -1,6 +1,6 @@
 // +build unit
 
-// Copyright 2017-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -17,6 +17,7 @@ package eni
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,4 +124,48 @@ func TestHasExpired(t *testing.T) {
 			assert.Equal(t, tc.expected, attachment.HasExpired())
 		})
 	}
+}
+
+func TestInitialize(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	timeoutFunc := func() {
+		wg.Done()
+	}
+
+	expiresAt := time.Now().Unix() + 1
+	attachment := &ENIAttachment{
+		TaskARN:       taskARN,
+		AttachmentARN: attachmentARN,
+		MACAddress:    mac,
+		Status:        ENIAttachmentNone,
+		ExpiresAt:     time.Unix(expiresAt, 0),
+	}
+	assert.NoError(t, attachment.Initialize(timeoutFunc))
+	wg.Wait()
+}
+
+func TestInitializeExpired(t *testing.T) {
+	expiresAt := time.Now().Unix() - 1
+	attachment := &ENIAttachment{
+		TaskARN:       taskARN,
+		AttachmentARN: attachmentARN,
+		MACAddress:    mac,
+		Status:        ENIAttachmentNone,
+		ExpiresAt:     time.Unix(expiresAt, 0),
+	}
+	assert.Error(t, attachment.Initialize(func() {}))
+}
+
+func TestInitializeExpiredButAlreadySent(t *testing.T) {
+	expiresAt := time.Now().Unix() - 1
+	attachment := &ENIAttachment{
+		TaskARN:          taskARN,
+		AttachmentARN:    attachmentARN,
+		AttachStatusSent: attachSent,
+		MACAddress:       mac,
+		Status:           ENIAttachmentNone,
+		ExpiresAt:        time.Unix(expiresAt, 0),
+	}
+	assert.NoError(t, attachment.Initialize(func() {}))
 }

@@ -1,6 +1,6 @@
 // +build functional,!windows
 
-// Copyright 2014-2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -1149,7 +1149,7 @@ func TestParallelPull(t *testing.T) {
 		}
 	}
 
-	timeout, err := time.ParseDuration("1m")
+	timeout, err := time.ParseDuration("2m")
 	if err != nil {
 		t.Fatalf("Could not parse timeout: %#v", err)
 	}

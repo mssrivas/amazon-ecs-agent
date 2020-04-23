@@ -1,4 +1,4 @@
-// Copyright 2014-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -34,10 +34,14 @@ import (
 type ContainerStateChange struct {
 	// TaskArn is the unique identifier for the task
 	TaskArn string
+	// RuntimeID is the dockerID of the container
+	RuntimeID string
 	// ContainerName is the name of the container
 	ContainerName string
 	// Status is the status to send
 	Status apicontainerstatus.ContainerStatus
+	// ImageDigest is the sha-256 digest of the container image as pulled from the repository
+	ImageDigest string
 
 	// Reason may contain details of why the container stopped
 	Reason string
@@ -86,6 +90,7 @@ type AttachmentStateChange struct {
 }
 
 // NewTaskStateChangeEvent creates a new task state change event
+// returns error if the state change doesn't need to be sent to the ECS backend.
 func NewTaskStateChangeEvent(task *apitask.Task, reason string) (TaskStateChange, error) {
 	var event TaskStateChange
 	taskKnownStatus := task.GetKnownStatus()
@@ -113,6 +118,7 @@ func NewTaskStateChangeEvent(task *apitask.Task, reason string) (TaskStateChange
 }
 
 // NewContainerStateChangeEvent creates a new container state change event
+// returns error if the state change doesn't need to be sent to the ECS backend.
 func NewContainerStateChangeEvent(task *apitask.Task, cont *apicontainer.Container, reason string) (ContainerStateChange, error) {
 	var event ContainerStateChange
 	contKnownStatus := cont.GetKnownStatus()
@@ -138,13 +144,14 @@ func NewContainerStateChangeEvent(task *apitask.Task, cont *apicontainer.Contain
 	event = ContainerStateChange{
 		TaskArn:       task.Arn,
 		ContainerName: cont.Name,
+		RuntimeID:     cont.GetRuntimeID(),
 		Status:        contKnownStatus.BackendStatus(cont.GetSteadyStateStatus()),
 		ExitCode:      cont.GetKnownExitCode(),
 		PortBindings:  cont.GetKnownPortBindings(),
+		ImageDigest:   cont.GetImageDigest(),
 		Reason:        reason,
 		Container:     cont,
 	}
-
 	return event, nil
 }
 

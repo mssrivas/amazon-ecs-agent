@@ -1,4 +1,4 @@
-// Copyright 2017-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -70,6 +70,28 @@ func (eni *ENIAttachment) StartTimer(timeoutFunc func()) error {
 		return errors.Errorf("eni attachment: timer expiration is in the past; expiration [%s] < now [%s]",
 			eni.ExpiresAt.String(), now.String())
 	}
+	seelog.Infof("Starting ENI ack timer with duration=%s, %s", duration.String(), eni.stringUnsafe())
+	eni.ackTimer = time.AfterFunc(duration, timeoutFunc)
+	return nil
+}
+
+// Initialize initializes the fields that can't be populated from loading state file.
+// Notably, this initializes the ack timer so that if we times out waiting for the eni to be attached, the attachment
+// can be removed from state.
+func (eni *ENIAttachment) Initialize(timeoutFunc func()) error {
+	eni.guard.Lock()
+	defer eni.guard.Unlock()
+
+	if eni.AttachStatusSent { // eni attachment status has been sent, no need to start ack timer.
+		return nil
+	}
+
+	now := time.Now()
+	duration := eni.ExpiresAt.Sub(now)
+	if duration <= 0 {
+		return errors.New("ENI attachment has already expired")
+	}
+
 	seelog.Infof("Starting ENI ack timer with duration=%s, %s", duration.String(), eni.stringUnsafe())
 	eni.ackTimer = time.AfterFunc(duration, timeoutFunc)
 	return nil
