@@ -38,11 +38,7 @@ func Run(arguments []string) int {
 		return printLicense()
 	} else if *parsedArgs.Version {
 		return version.PrintVersion()
-	} else if *parsedArgs.Healthcheck {
-		// Timeout is purposely set to shorter than the default docker healthcheck
-		// timeout of 30s. This is so that we can catch any http timeout and log the
-		// issue within agent logs.
-		// see https://docs.docker.com/engine/reference/builder/#healthcheck
+	} else if !*parsedArgs.BlackholeEC2Metadata && *parsedArgs.Healthcheck {
 		return runHealthcheck("http://localhost:51678/v1/metadata", time.Second*25)
 	}
 

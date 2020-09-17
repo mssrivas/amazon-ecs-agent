@@ -307,14 +307,16 @@ func (agent *ecsAgent) doStart(containerChangeEventStream *eventstream.EventStre
 		}
 	}
 
-	// Register the container instance
-	err = agent.registerContainerInstance(client, vpcSubnetAttributes)
-	if err != nil {
-		if isTransient(err) {
-			return exitcodes.ExitError
+	// Skip Registering the container instance if it's ON-PREM
+	//if agent.cfg.NoIID {
+		err = agent.registerContainerInstance(client, vpcSubnetAttributes)
+		if err != nil {
+			if isTransient(err) {
+				return exitcodes.ExitError
+			}
+			return exitcodes.ExitTerminal
 		}
-		return exitcodes.ExitTerminal
-	}
+	//}
 
 	// Add container instance ARN to metadata manager
 	if agent.cfg.ContainerMetadataEnabled.Enabled() {
@@ -511,7 +513,10 @@ func (agent *ecsAgent) registerContainerInstance(
 	additionalAttributes []*ecs.Attribute) error {
 	// Preflight request to make sure they're good
 	if preflightCreds, err := agent.credentialProvider.Get(); err != nil || preflightCreds.AccessKeyID == "" {
-		seelog.Warnf("Error getting valid credentials (AKID %s): %v", preflightCreds.AccessKeyID, err)
+            seelog.Info("Exxiprationwindow --> %v",agent.credentialProvider.IsExpired())
+            if agent.cfg.NoIID {
+			seelog.Warnf("Error getting valid credentials (AKID %s): %v", preflightCreds.AccessKeyID, err)
+		}
 	}
 
 	agentCapabilities, err := agent.capabilities()
