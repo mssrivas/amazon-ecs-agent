@@ -509,6 +509,7 @@ func environmentConfig() (Config, error) {
 	}
 	return Config{
 		Cluster:                             os.Getenv("ECS_CLUSTER"),
+		NoIID:                               utils.ParseBool(os.Getenv("NO_IID"), false),
 		APIEndpoint:                         os.Getenv("ECS_BACKEND_HOST"),
 		AWSRegion:                           os.Getenv("AWS_DEFAULT_REGION"),
 		DockerEndpoint:                      os.Getenv("DOCKER_HOST"),
@@ -587,6 +588,7 @@ func ec2MetadataConfig(ec2client ec2.EC2MetadataClient) Config {
 func (cfg *Config) String() string {
 	return fmt.Sprintf(
 		"Cluster: %v, "+
+			"NoIID: %v, "+
 			" Region: %v, "+
 			" DataDir: %v,"+
 			" Checkpoint: %v, "+
@@ -602,6 +604,7 @@ func (cfg *Config) String() string {
 			"TaskCPUMemLimit: %v, "+
 			"%s",
 		cfg.Cluster,
+		cfg.NoIID,
 		cfg.AWSRegion,
 		cfg.DataDir,
 		cfg.Checkpoint,
