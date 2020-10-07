@@ -513,7 +513,6 @@ func (agent *ecsAgent) registerContainerInstance(
 	additionalAttributes []*ecs.Attribute) error {
 	// Preflight request to make sure they're good
 	if preflightCreds, err := agent.credentialProvider.Get(); err != nil || preflightCreds.AccessKeyID == "" {
-		seelog.Info("Exxiprationwindow -->  %v", preflightCreds.Expiration)
 		if agent.cfg.NoIID {
 			seelog.Warnf("Error getting valid credentials (AKID %s): %v", preflightCreds.AccessKeyID, err)
 		}
