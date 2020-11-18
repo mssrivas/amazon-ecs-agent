@@ -1,6 +1,6 @@
 // +build linux
 
-// Copyright 2017-2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -17,25 +17,24 @@ package app
 
 import (
 	"fmt"
-	"net/http"
 
 	asmfactory "github.com/aws/amazon-ecs-agent/agent/asm/factory"
 	"github.com/aws/amazon-ecs-agent/agent/config"
 	"github.com/aws/amazon-ecs-agent/agent/credentials"
-	"github.com/aws/amazon-ecs-agent/agent/ec2"
 	"github.com/aws/amazon-ecs-agent/agent/ecs_client/model/ecs"
 	"github.com/aws/amazon-ecs-agent/agent/ecscni"
 	"github.com/aws/amazon-ecs-agent/agent/engine"
 	"github.com/aws/amazon-ecs-agent/agent/engine/dockerstate"
-	"github.com/aws/amazon-ecs-agent/agent/eni/pause"
 	"github.com/aws/amazon-ecs-agent/agent/eni/udevwrapper"
 	"github.com/aws/amazon-ecs-agent/agent/eni/watcher"
 	"github.com/aws/amazon-ecs-agent/agent/gpu"
 	ssmfactory "github.com/aws/amazon-ecs-agent/agent/ssm/factory"
+
 	"github.com/aws/amazon-ecs-agent/agent/statechange"
 	"github.com/aws/amazon-ecs-agent/agent/taskresource"
 	cgroup "github.com/aws/amazon-ecs-agent/agent/taskresource/cgroup/control"
 	"github.com/aws/amazon-ecs-agent/agent/utils/ioutilwrapper"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/cihub/seelog"
 	"github.com/pkg/errors"
 )
@@ -86,17 +85,6 @@ func (agent *ecsAgent) initializeTaskENIDependencies(state dockerstate.TaskEngin
 		return err, true
 	}
 
-	// Load the pause container's image from the 'disk'
-	if _, err := agent.pauseLoader.LoadImage(agent.ctx, agent.cfg, agent.dockerClient); err != nil {
-		if pause.IsNoSuchFileError(err) || pause.UnsupportedPlatform(err) {
-			// If the pause container's image tarball doesn't exist or if the
-			// invocation is done for an unsupported platform, we cannot recover.
-			// Return the error as terminal for these cases
-			return err, true
-		}
-		return err, false
-	}
-
 	if err := agent.startUdevWatcher(state, taskEngine.StateChangeEvents()); err != nil {
 		// If udev watcher was not initialized in this run because of the udev socket
 		// file not being available etc, the Agent might be able to retry and succeed
@@ -133,14 +121,13 @@ func (agent *ecsAgent) setVPCSubnet() (error, bool) {
 	return nil, false
 }
 
-// isInstanceLaunchedInVPC returns false when the http status code is set to
-// 'not found' (404) when querying the vpc id from instance metadata
+// isInstanceLaunchedInVPC returns false when the awserr returned is an EC2MetadataError
+// when querying the vpc id from instance metadata
 func isInstanceLaunchedInVPC(err error) bool {
-	if metadataErr, ok := err.(*ec2.MetadataError); ok &&
-		metadataErr.GetStatusCode() == http.StatusNotFound {
+	if aerr, ok := err.(awserr.Error); ok &&
+		aerr.Code() == "EC2MetadataError" {
 		return false
 	}
-
 	return true
 }
 
@@ -214,6 +201,7 @@ func (agent *ecsAgent) initializeResourceFields(credentialsManager credentials.M
 			ASMClientCreator:   asmfactory.NewClientCreator(),
 			SSMClientCreator:   ssmfactory.NewSSMClientCreator(),
 			CredentialsManager: credentialsManager,
+			EC2InstanceID:      agent.getEC2InstanceID(),
 		},
 		Ctx:              agent.ctx,
 		DockerClient:     agent.dockerClient,
@@ -250,4 +238,11 @@ func (agent *ecsAgent) getPlatformDevices() []*ecs.PlatformDevice {
 		}
 	}
 	return nil
+}
+
+func (agent *ecsAgent) loadPauseContainer() error {
+	// Load the pause container's image from the 'disk'
+	_, err := agent.pauseLoader.LoadImage(agent.ctx, agent.cfg, agent.dockerClient)
+
+	return err
 }

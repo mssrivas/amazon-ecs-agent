@@ -1,4 +1,4 @@
-// Copyright 2014-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -93,6 +93,8 @@ const (
 
 var ctxTimeoutStopContainer = dockerclient.StopContainerTimeout
 
+type inactivityTimeoutHandlerFunc func(reader io.ReadCloser, timeout time.Duration, cancelRequest func(), canceled *uint32) (io.ReadCloser, chan<- struct{})
+
 // DockerClient interface to make testing it easier
 type DockerClient interface {
 	// SupportedVersions returns a slice of the supported docker versions (or at least supposedly supported).
@@ -180,6 +182,9 @@ type DockerClient interface {
 
 	// LoadImage loads an image from an input stream. A timeout value and a context should be provided for the request.
 	LoadImage(context.Context, io.Reader, time.Duration) error
+
+	// Info returns the information of the Docker server.
+	Info(context.Context, time.Duration) (types.Info, error)
 }
 
 // DockerGoClient wraps the underlying go-dockerclient and docker/docker library.
@@ -201,14 +206,15 @@ type DockerClient interface {
 // Implements DockerClient
 // TODO Remove clientfactory field once all API calls are migrated to sdkclientFactory
 type dockerGoClient struct {
-	sdkClientFactory sdkclientfactory.Factory
-	version          dockerclient.DockerVersion
-	ecrClientFactory ecr.ECRFactory
-	auth             dockerauth.DockerAuthProvider
-	ecrTokenCache    async.Cache
-	config           *config.Config
-	context          context.Context
-	imagePullBackoff retry.Backoff
+	sdkClientFactory         sdkclientfactory.Factory
+	version                  dockerclient.DockerVersion
+	ecrClientFactory         ecr.ECRFactory
+	auth                     dockerauth.DockerAuthProvider
+	ecrTokenCache            async.Cache
+	config                   *config.Config
+	context                  context.Context
+	imagePullBackoff         retry.Backoff
+	inactivityTimeoutHandler inactivityTimeoutHandlerFunc
 
 	_time     ttime.Time
 	_timeOnce sync.Once
@@ -276,6 +282,7 @@ func NewDockerGoClient(sdkclientFactory sdkclientfactory.Factory,
 		context:          ctx,
 		imagePullBackoff: retry.NewExponentialBackoff(minimumPullRetryDelay, maximumPullRetryDelay,
 			pullRetryJitterMultiplier, pullRetryDelayMultiplier),
+		inactivityTimeoutHandler: handleInactivityTimeout,
 	}, nil
 }
 
@@ -307,7 +314,7 @@ func (dg *dockerGoClient) PullImage(ctx context.Context, image string,
 			func() error {
 				err := dg.pullImage(ctx, image, authData)
 				if err != nil {
-					seelog.Warnf("DockerGoClient: failed to pull image %s: %s", image, err.Error())
+					seelog.Errorf("DockerGoClient: failed to pull image %s: [%s] %s", image, err.ErrorName(), err.Error())
 				}
 				return err
 			})
@@ -388,7 +395,7 @@ func (dg *dockerGoClient) pullImage(ctx context.Context, image string,
 		// handle inactivity timeout
 		var canceled uint32
 		var ch chan<- struct{}
-		reader, ch = handleInactivityTimeout(reader, dg.config.ImagePullInactivityTimeout, cancelRequest, &canceled)
+		reader, ch = dg.inactivityTimeoutHandler(reader, dg.config.ImagePullInactivityTimeout, cancelRequest, &canceled)
 		defer reader.Close()
 		defer close(ch)
 		decoder := json.NewDecoder(reader)
@@ -688,7 +695,7 @@ func (dg *dockerGoClient) stopContainer(ctx context.Context, dockerID string, ti
 	err = client.ContainerStop(ctx, dockerID, &timeout)
 	metadata := dg.containerMetadata(ctx, dockerID)
 	if err != nil {
-		seelog.Infof("DockerGoClient: error stopping container %s: %v", dockerID, err)
+		seelog.Errorf("DockerGoClient: error stopping container %s: %v", dockerID, err)
 		if metadata.Error == nil {
 			if strings.Contains(err.Error(), "No such container") {
 				err = NoSuchContainerError{dockerID}
@@ -863,22 +870,26 @@ func (dg *dockerGoClient) ContainerEvents(ctx context.Context) (<-chan DockerCon
 		for {
 			select {
 			case err := <-eventErr:
-				if err == io.EOF || err == io.ErrUnexpectedEOF {
-					seelog.Info("DockerGoClient: All events have been received")
-					cancel()
+				// If parent ctx has been canceled, stop listening and return. Otherwise reopen the stream.
+				if ctx.Err() != nil {
 					return
-				} else {
-					// If an error is returned, we need to reopen channel to continue listening
-					seelog.Errorf("DockerGoClient: error while listening to Docker Events : %v", err)
-					nextCtx, nextCancel := context.WithCancel(ctx)
-					dockerEvents, eventErr = client.Events(nextCtx, types.EventsOptions{})
-					// Cache the event from docker client.
-					go buffer.StartListening(nextCtx, dockerEvents)
-					// Close previous stream after starting to listen on new one
-					cancel()
-					// Reassign cancel variable next Cancel function to setup next iteration of loop.
-					cancel = nextCancel
 				}
+
+				if err == io.EOF {
+					seelog.Infof("DockerGoClient: Docker events stream closed with: %v", err)
+				} else {
+					seelog.Errorf("DockerGoClient: Docker events stream closed with error: %v", err)
+				}
+
+				// Reopen a new event stream to continue listening.
+				nextCtx, nextCancel := context.WithCancel(ctx)
+				dockerEvents, eventErr = client.Events(nextCtx, types.EventsOptions{})
+				// Cache the event from docker client.
+				go buffer.StartListening(nextCtx, dockerEvents)
+				// Close previous stream after starting to listen on new one
+				cancel()
+				// Reassign cancel variable next Cancel function to setup next iteration of loop.
+				cancel = nextCancel
 			case <-ctx.Done():
 				return
 			}
@@ -1067,6 +1078,22 @@ func (dg *dockerGoClient) Version(ctx context.Context, timeout time.Duration) (s
 	return version, nil
 }
 
+func (dg *dockerGoClient) Info(ctx context.Context, timeout time.Duration) (types.Info, error) {
+	derivedCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	client, err := dg.sdkDockerClient()
+	if err != nil {
+		return types.Info{}, err
+	}
+	info, infoErr := client.Info(derivedCtx)
+	if infoErr != nil {
+		return types.Info{}, infoErr
+	}
+
+	return info, nil
+}
+
 func (dg *dockerGoClient) getDaemonVersion() string {
 	dg.lock.Lock()
 	defer dg.lock.Unlock()
@@ -1209,8 +1236,8 @@ func (dg *dockerGoClient) removeVolume(ctx context.Context, name string) error {
 		return &CannotGetDockerClientError{version: dg.version, err: err}
 	}
 
-	ok := client.VolumeRemove(ctx, name, false)
-	if ok != nil {
+	err = client.VolumeRemove(ctx, name, false)
+	if err != nil {
 		return &CannotRemoveVolumeError{err}
 	}
 
@@ -1316,7 +1343,7 @@ func (dg *dockerGoClient) Stats(ctx context.Context, id string, inactivityTimeou
 			// handle inactivity timeout
 			var canceled uint32
 			var ch chan<- struct{}
-			resp.Body, ch = handleInactivityTimeout(resp.Body, inactivityTimeout, cancelRequest, &canceled)
+			resp.Body, ch = dg.inactivityTimeoutHandler(resp.Body, inactivityTimeout, cancelRequest, &canceled)
 			defer resp.Body.Close()
 			defer close(ch)
 

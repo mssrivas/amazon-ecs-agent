@@ -1,6 +1,6 @@
 // +build functional
 
-// Copyright 2014-2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,7 +28,6 @@ import (
 	"github.com/aws/amazon-ecs-agent/agent/ec2"
 	ecsapi "github.com/aws/amazon-ecs-agent/agent/ecs_client/model/ecs"
 	. "github.com/aws/amazon-ecs-agent/agent/functional_tests/util"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -44,10 +42,17 @@ import (
 )
 
 const (
-	waitTaskStateChangeDuration         = 2 * time.Minute
-	waitIdleMetricsInCloudwatchDuration = 4 * time.Minute
-	waitBusyMetricsInCloudwatchDuration = 10 * time.Minute
-	awslogsLogGroupName                 = "ecs-functional-tests"
+	waitTaskStateChangeDuration            = 2 * time.Minute
+	waitIdleMetricsInCloudwatchDuration    = 4 * time.Minute
+	waitMinimalMetricsInCloudwatchDuration = 5 * time.Minute
+	waitBusyMetricsInCloudwatchDuration    = 10 * time.Minute
+	awslogsLogGroupName                    = "ecs-functional-tests"
+
+	// Even when the test cluster is deleted, TACS could still post cluster
+	// metrics to CW due to eventual consistency for upto a maximum of 2 minutes.
+	// While doing this, it would recreate log groups even after their manual deletion.
+	// Hence, the wait before deleting the tests' log groups.
+	waitTimeBeforeDeletingCILogGroups = 2 * time.Minute
 
 	// 'awsvpc' test parameters
 	awsvpcTaskDefinition     = "nginx-awsvpc"
@@ -182,168 +187,6 @@ func TestPortResourceContention(t *testing.T) {
 
 	go testTask.WaitStopped(2 * time.Minute)
 	testTask2.WaitStopped(2 * time.Minute)
-}
-
-func TestLabels(t *testing.T) {
-	ctx := context.TODO()
-	agent := RunAgent(t, nil)
-	defer agent.Cleanup()
-	agent.RequireVersion(">=1.5.0")
-
-	task, err := agent.StartTask(t, labelsTaskDefinition)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = task.WaitStopped(2 * time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dockerId, err := agent.ResolveTaskDockerID(task, "labeled")
-	if err != nil {
-		t.Fatal(err)
-	}
-	container, err := agent.DockerClient.ContainerInspect(ctx, dockerId)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if container.Config.Labels["label1"] != "" || container.Config.Labels["com.foo.label2"] != "value" {
-		t.Fatalf("Labels did not match expected; expected to contain label1: com.foo.label2:value, got %v", container.Config.Labels)
-	}
-}
-
-func TestLogdriverOptions(t *testing.T) {
-	ctx := context.TODO()
-	agent := RunAgent(t, nil)
-	defer agent.Cleanup()
-	agent.RequireVersion(">=1.5.0")
-
-	task, err := agent.StartTask(t, logDriverTaskDefinition)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = task.WaitStopped(2 * time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dockerId, err := agent.ResolveTaskDockerID(task, "exit")
-	if err != nil {
-		t.Fatal(err)
-	}
-	container, err := agent.DockerClient.ContainerInspect(ctx, dockerId)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if container.HostConfig.LogConfig.Type != "json-file" {
-		t.Errorf("Expected json-file type logconfig, was %v", container.HostConfig.LogConfig.Type)
-	}
-	if !reflect.DeepEqual(map[string]string{"max-file": "50", "max-size": "50k"}, container.HostConfig.LogConfig.Config) {
-		t.Errorf("Expected max-file:50 max-size:50k for logconfig options, got %v", container.HostConfig.LogConfig.Config)
-	}
-}
-
-func TestTaskCleanup(t *testing.T) {
-	ctx := context.TODO()
-	// Set the task cleanup time to just over a minute.
-	os.Setenv("ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION", "70s")
-	agent := RunAgent(t, nil)
-	defer func() {
-		agent.Cleanup()
-		os.Unsetenv("ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION")
-	}()
-
-	// Start a task and get the container id once the task transitions to RUNNING.
-	task, err := agent.StartTask(t, cleanupTaskDefinition)
-	if err != nil {
-		t.Fatalf("Error starting task: %v", err)
-	}
-
-	err = task.WaitRunning(2 * time.Minute)
-	if err != nil {
-		t.Fatalf("Error waiting for running task: %v", err)
-	}
-
-	dockerId, err := agent.ResolveTaskDockerID(task, cleanupTaskDefinition)
-	if err != nil {
-		t.Fatalf("Error resolving docker id for container in task: %v", err)
-	}
-
-	// We should be able to inspect the container ID from docker at this point.
-	_, err = agent.DockerClient.ContainerInspect(ctx, dockerId)
-	if err != nil {
-		t.Fatalf("Error inspecting container in task: %v", err)
-	}
-
-	// Stop the task and sleep for 2 minutes to let the task be cleaned up.
-	containerStopTimeout := 1 * time.Second
-	err = agent.DockerClient.ContainerStop(ctx, dockerId, &containerStopTimeout)
-	if err != nil {
-		t.Fatalf("Error stoppping task: %v", err)
-	}
-
-	err = task.WaitStopped(1 * time.Minute)
-	if err != nil {
-		t.Fatalf("Error waiting for task stopped: %v", err)
-	}
-
-	time.Sleep(2 * time.Minute)
-
-	// We should not be able to describe the container now since it has been cleaned up.
-	_, err = agent.DockerClient.ContainerInspect(ctx, dockerId)
-	if err == nil {
-		t.Fatalf("Expected error inspecting container in task")
-	}
-}
-
-// TestNetworkModeNone tests if the 'none' contaienr network mode is configured
-// correctly in task definition
-func TestNetworkModeNone(t *testing.T) {
-	agent := RunAgent(t, nil)
-	defer agent.Cleanup()
-
-	err := networkModeTest(t, agent, "none")
-	if err != nil {
-		t.Fatalf("Networking mode none testing failed, err: %v", err)
-	}
-}
-
-func networkModeTest(t *testing.T, agent *TestAgent, mode string) error {
-	tdOverride := make(map[string]string)
-
-	// Test the host network mode
-	tdOverride["$$$$NETWORK_MODE$$$$"] = mode
-	task, err := agent.StartTaskWithTaskDefinitionOverrides(t, networkModeTaskDefinition, tdOverride)
-	if err != nil {
-		return fmt.Errorf("error starting task with network %v, err: %v", mode, err)
-	}
-	defer func() {
-		if err := task.Stop(); err != nil {
-			return
-		}
-		task.WaitStopped(waitTaskStateChangeDuration)
-	}()
-
-	err = task.WaitRunning(waitTaskStateChangeDuration)
-	if err != nil {
-		return fmt.Errorf("error waiting for task running, err: %v", err)
-	}
-	containerId, err := agent.ResolveTaskDockerID(task, "network-"+mode)
-	if err != nil {
-		return fmt.Errorf("error resolving docker id for container \"network-%s\": %v", mode, err)
-	}
-
-	networks, err := agent.GetContainerNetworkMode(containerId)
-	if err != nil {
-		return err
-	}
-	if len(networks) != 1 {
-		return fmt.Errorf("found multiple networks in container config")
-	}
-	if networks[0] != mode {
-		return fmt.Errorf("did not found the expected network mode")
-	}
-	return nil
 }
 
 // awsvpcNetworkModeTest tests if the 'awsvpc' network mode works properly
@@ -653,6 +496,189 @@ func telemetryTestWithStatsPolling(t *testing.T, taskDefinition string) {
 	require.NoError(t, err, "Waiting for task stop failed")
 }
 
+func telemetryStorageStatsTest(t *testing.T, taskDefinition string) {
+	// telemetry task requires 2GB of memory (for either linux or windows); requires a bit more to be stable
+	RequireMinimumMemory(t, 2200)
+
+	newClusterName := "ecstest-storagestats-" + uuid.New()
+	putAccountInsights := ecsapi.PutAccountSettingInput{
+		Name:  aws.String("containerInsights"),
+		Value: aws.String("enabled"),
+	}
+	_, err := ECS.PutAccountSetting(&putAccountInsights)
+	require.NoError(t, err, "Failed to update account settings")
+
+	_, err = ECS.CreateCluster(&ecsapi.CreateClusterInput{
+		ClusterName: aws.String(newClusterName),
+	})
+	require.NoError(t, err, "Failed to create cluster")
+	defer func() {
+		DeleteCluster(t, newClusterName)
+		time.Sleep(waitTimeBeforeDeletingCILogGroups)
+		cwlClient := cloudwatchlogs.New(session.New(), aws.NewConfig().WithRegion(*ECS.Config.Region))
+		cwlClient.DeleteLogGroup(&cloudwatchlogs.DeleteLogGroupInput{
+			LogGroupName: aws.String(fmt.Sprintf("/aws/ecs/containerinsights/%s/performance", newClusterName)),
+		})
+	}()
+
+	agentOptions := AgentOptions{
+		ExtraEnvironment: map[string]string{
+			"ECS_CLUSTER": newClusterName,
+		},
+	}
+	agent := RunAgent(t, &agentOptions)
+	defer agent.Cleanup()
+	agent.RequireVersion(">=1.29.0")
+
+	cwclient := cloudwatch.New(session.New(), aws.NewConfig().WithRegion(*ECS.Config.Region))
+	params := &cloudwatch.GetMetricStatisticsInput{
+		Namespace: aws.String("ECS/ContainerInsights"),
+		Period:    aws.Int64(60),
+		Statistics: []*string{
+			aws.String("Average"),
+			aws.String("SampleCount"),
+		},
+		Dimensions: []*cloudwatch.Dimension{
+			{
+				Name:  aws.String("ClusterName"),
+				Value: aws.String(newClusterName),
+			},
+		},
+	}
+
+	// start storageStats task
+	testTask, err := agent.StartTask(t, taskDefinition)
+	require.NoError(t, err, "Failed to start storageStats task")
+	err = testTask.WaitRunning(waitTaskStateChangeDuration)
+	require.NoError(t, err, "Error wait storageStats task running")
+
+	// collect and validate minimal state metrics
+	time.Sleep(waitMinimalMetricsInCloudwatchDuration)
+	params.EndTime = aws.Time(RoundTimeUp(time.Now(), time.Minute).UTC())
+	params.StartTime = aws.Time((*params.EndTime).Add(-waitMinimalMetricsInCloudwatchDuration).UTC())
+
+	// verify that metrics are flowing for StorageReadBytes
+	params.MetricName = aws.String("StorageReadBytes")
+	resp, err := cwclient.GetMetricStatistics(params)
+	assert.NotNil(t, resp, "Task is running, no metrics available for StorageReadBytes")
+	assert.NotNil(t, resp.Datapoints, "Task is running, nil datapoints returned for StorageReadBytes")
+	metricsCount := len(resp.Datapoints)
+	assert.NotZero(t, metricsCount, "Task is running, no datapoints returned for StorageReadBytes")
+
+	// verify that metrics are flowing for StorageWriteBytes
+	params.MetricName = aws.String("StorageWriteBytes")
+	resp, err = cwclient.GetMetricStatistics(params)
+	assert.NotNil(t, resp, "Task is running, no metrics available for StorageWriteBytes")
+	assert.NotNil(t, resp.Datapoints, "Task is running, nil datapoints returned for StorageWriteBytes")
+	metricsCount = len(resp.Datapoints)
+	assert.NotZero(t, metricsCount, "Task is running, no datapoints returned for StorageWriteBytes")
+
+	// stop storageStats task
+	err = testTask.Stop()
+	require.NoError(t, err, "Failed to stop the storageStats task")
+	err = testTask.WaitStopped(waitTaskStateChangeDuration)
+	require.NoError(t, err, "Waiting for task stop failed")
+}
+
+func telemetryNetworkStatsTest(t *testing.T, networkMode string, taskDefinition string) {
+	// telemetry task requires 2GB of memory (for either linux or windows); requires a bit more to be stable
+	RequireMinimumMemory(t, 2200)
+
+	newClusterName := "ecstest-networkstats-" + uuid.New()
+	putAccountInsights := ecsapi.PutAccountSettingInput{
+		Name:  aws.String("containerInsights"),
+		Value: aws.String("enabled"),
+	}
+	_, err := ECS.PutAccountSetting(&putAccountInsights)
+	require.NoError(t, err, "Failed to update account settings")
+
+	_, err = ECS.CreateCluster(&ecsapi.CreateClusterInput{
+		ClusterName: aws.String(newClusterName),
+	})
+	require.NoError(t, err, "Failed to create cluster")
+	defer func() {
+		DeleteCluster(t, newClusterName)
+		time.Sleep(waitTimeBeforeDeletingCILogGroups)
+		cwlClient := cloudwatchlogs.New(session.New(), aws.NewConfig().WithRegion(*ECS.Config.Region))
+		cwlClient.DeleteLogGroup(&cloudwatchlogs.DeleteLogGroupInput{
+			LogGroupName: aws.String(fmt.Sprintf("/aws/ecs/containerinsights/%s/performance", newClusterName)),
+		})
+	}()
+
+	agentOptions := AgentOptions{
+		EnableTaskENI: true,
+		ExtraEnvironment: map[string]string{
+			"ECS_CLUSTER": newClusterName,
+		},
+	}
+	agent := RunAgent(t, &agentOptions)
+	defer agent.Cleanup()
+	agent.RequireVersion(">=1.29.0")
+
+	cwclient := cloudwatch.New(session.New(), aws.NewConfig().WithRegion(*ECS.Config.Region))
+	params := &cloudwatch.GetMetricStatisticsInput{
+		Namespace: aws.String("ECS/ContainerInsights"),
+		Period:    aws.Int64(60),
+		Statistics: []*string{
+			aws.String("Average"),
+			aws.String("SampleCount"),
+		},
+		Dimensions: []*cloudwatch.Dimension{
+			{
+				Name:  aws.String("ClusterName"),
+				Value: aws.String(newClusterName),
+			},
+		},
+	}
+
+	tdOverrides := make(map[string]string)
+	if networkMode != "" {
+		tdOverrides["$$$NETWORK_MODE$$$"] = networkMode
+	}
+
+	var testTask *TestTask
+	// start networkStats task
+	if networkMode == "awsvpc" {
+		testTask, err = agent.StartAWSVPCTask("network-stats", tdOverrides)
+	} else {
+		testTask, err = agent.StartTaskWithTaskDefinitionOverrides(t, "network-stats", tdOverrides)
+	}
+	require.NoError(t, err, "Failed to start networkStats task")
+	err = testTask.WaitRunning(waitTaskStateChangeDuration)
+	require.NoError(t, err, "Error wait networkStats task running")
+
+	// collect and validate minimal state metrics
+	time.Sleep(waitMinimalMetricsInCloudwatchDuration)
+	params.EndTime = aws.Time(RoundTimeUp(time.Now(), time.Minute).UTC())
+	params.StartTime = aws.Time((*params.EndTime).Add(-waitMinimalMetricsInCloudwatchDuration).UTC())
+
+	// verify that metrics are flowing for NetworkRxBytes
+	params.MetricName = aws.String("NetworkRxBytes")
+	resp, err := cwclient.GetMetricStatistics(params)
+	assert.NotNil(t, resp, "Task is running, no metrics available for NetworkRxBytes")
+	if networkMode == "bridge" {
+		assert.NotNil(t, resp.Datapoints, "Task is running, nil datapoints returned for NetworkRxBytes")
+	} else {
+		assert.Nil(t, resp.Datapoints, "Task is running, nil datapoints expected for NetworkRxBytes")
+	}
+
+	// verify that metrics are flowing for NetworkTxBytes
+	params.MetricName = aws.String("NetworkTxBytes")
+	resp, err = cwclient.GetMetricStatistics(params)
+	assert.NotNil(t, resp, "Task is running, no metrics available for NetworkTxBytes")
+	if networkMode == "bridge" {
+		assert.NotNil(t, resp.Datapoints, "Task is running, nil datapoints returned for NetworkTxBytes")
+	} else {
+		assert.Nil(t, resp.Datapoints, "Task is running, nil datapoints expected for NetworkTxBytes")
+	}
+
+	// stop networkStats task
+	err = testTask.Stop()
+	require.NoError(t, err, "Failed to stop the networkStats task")
+	err = testTask.WaitStopped(waitTaskStateChangeDuration)
+	require.NoError(t, err, "Waiting for task stop failed")
+}
+
 // containerHealthMetricsTest tests the container health metrics based on the task definition
 func containerHealthMetricsTest(t *testing.T, taskDefinition string, overrides map[string]string) {
 	agent := RunAgent(t, nil)
@@ -691,6 +717,41 @@ func waitCloudwatchLogs(client *cloudwatchlogs.CloudWatchLogs, params *cloudwatc
 
 	return nil, fmt.Errorf("Timeout waiting for the logs to be sent to cloud watch logs")
 }
+
+func waitCloudwatchLogsWithFilter(client *cloudwatchlogs.CloudWatchLogs, params *cloudwatchlogs.FilterLogEventsInput,
+	timeout time.Duration) (*cloudwatchlogs.FilterLogEventsOutput, error) {
+	timer := time.NewTimer(timeout)
+
+	waitEventErr := make(chan error, 1)
+	cancelled := false
+
+	var output *cloudwatchlogs.FilterLogEventsOutput
+	go func() {
+		for !cancelled {
+			resp, err := client.FilterLogEvents(params)
+			if err != nil {
+				awsError, ok := err.(awserr.Error)
+				if !ok || awsError.Code() != "ResourceNotFoundException" {
+					waitEventErr <- err
+				}
+			} else if len(resp.Events) > 0 {
+				output = resp
+				waitEventErr <- nil
+				break
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+
+	select {
+	case err := <-waitEventErr:
+		return output, err
+	case <-timer.C:
+		cancelled = true
+		return nil, fmt.Errorf("timeout waiting for the logs to be sent to cloudwatch logs")
+	}
+}
+
 func testV3TaskEndpoint(t *testing.T, taskName, containerName, networkMode, awslogsPrefix string) {
 	agentOptions := &AgentOptions{
 		EnableTaskENI: true,
@@ -699,7 +760,6 @@ func testV3TaskEndpoint(t *testing.T, taskName, containerName, networkMode, awsl
 		},
 	}
 
-	os.Setenv("ECS_FTEST_FORCE_NET_HOST", "true")
 	agent := RunAgent(t, agentOptions)
 	defer agent.Cleanup()
 

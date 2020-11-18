@@ -1,4 +1,4 @@
-// Copyright 2014-2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -33,17 +33,23 @@ const (
 	ContainerStatsBufferLength = 120
 )
 
-func newStatsContainer(dockerID string, client dockerapi.DockerClient, resolver resolver.ContainerMetadataResolver) *StatsContainer {
+func newStatsContainer(dockerID string, client dockerapi.DockerClient, resolver resolver.ContainerMetadataResolver) (*StatsContainer, error) {
+	dockerContainer, err := resolver.ResolveContainer(dockerID)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &StatsContainer{
 		containerMetadata: &ContainerMetadata{
-			DockerID: dockerID,
+			DockerID:    dockerID,
+			Name:        dockerContainer.Container.Name,
+			NetworkMode: dockerContainer.Container.GetNetworkMode(),
 		},
 		ctx:      ctx,
 		cancel:   cancel,
 		client:   client,
 		resolver: resolver,
-	}
+	}, nil
 }
 
 func (container *StatsContainer) StartStatsCollection() {

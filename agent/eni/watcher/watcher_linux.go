@@ -1,6 +1,6 @@
 // +build linux
 
-// Copyright 2017-2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -192,9 +192,11 @@ func (udevWatcher *UdevWatcher) reconcileOnce() error {
 			// skip logging status sent error as it's redundant and doesn't really indicate a problem
 			if strings.Contains(err.Error(), eniStatusSentMsg) {
 				continue
+			} else if _, ok := err.(*unmanagedENIError); ok {
+				log.Debugf("Udev watcher reconciliation: unable to send state change: %v", err)
+			} else {
+				log.Warnf("Udev watcher reconciliation: unable to send state change: %v", err)
 			}
-
-			log.Warnf("Udev watcher reconciliation: unable to send state change: %v", err)
 		}
 	}
 	return nil

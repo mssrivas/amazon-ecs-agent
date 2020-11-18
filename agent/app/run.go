@@ -1,4 +1,4 @@
-// Copyright 2014-2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"). You may
 // not use this file except in compliance with the License. A copy of the
@@ -38,6 +38,8 @@ func Run(arguments []string) int {
 		return printLicense()
 	} else if *parsedArgs.Version {
 		return version.PrintVersion()
+	} else if *parsedArgs.Healthcheck {
+		return runHealthcheck()
 	}
 
 	logger.SetLevel(*parsedArgs.LogLevel)
